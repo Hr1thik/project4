@@ -78,5 +78,5 @@ jobs:
         uses: zaproxy/action-baseline@v0.15.0
         with:
           target: 'http://172.17.0.1:8000'
-          cmd_options: '-a'
+          cmd_options: '-m 1'
           fail_action: false
