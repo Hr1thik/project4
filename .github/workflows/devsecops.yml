@@ -1,0 +1,82 @@
+name: Project4 DevSecOps Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  sast-and-dependency-scan:
+    name: Step 1A - SAST & Dependency Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Security Scanners (Bandit, Semgrep, pip-audit)
+        run: |
+          pip install --upgrade pip
+          pip install bandit semgrep pip-audit
+
+      - name: Run SAST Scan (Bandit)
+        run: bandit -r project4/ -ll || true
+
+      - name: Run SAST Scan (Semgrep)
+        run: semgrep --config p/python --config p/django project4/ || true
+
+      - name: Run Dependency Vulnerability Scan (pip-audit)
+        run: pip-audit -r requirements.txt || true
+
+      - name: Run Trivy Filesystem Vulnerability Scan
+        run: |
+          docker run --rm -v "$PWD:/workspace" aquasec/trivy:latest fs --severity CRITICAL,HIGH /workspace || true
+
+  build-and-push:
+    name: Step 2 - Docker Build & Push
+    needs: sast-and-dependency-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/project4:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/project4:${{ github.sha }}
+
+      - name: Run Trivy Container Image Scan
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --severity CRITICAL,HIGH ${{ secrets.DOCKERHUB_USERNAME }}/project4:latest || true
+
+  dast-scan:
+    name: Step 1B - DAST Scan (OWASP ZAP)
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start Project4 Container
+        run: |
+          docker run -d --name project4-app -p 8000:8000 ${{ secrets.DOCKERHUB_USERNAME }}/project4:latest
+          sleep 8
+          curl -I http://localhost:8000
+
+      - name: Run OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.15.0
+        with:
+          target: 'http://172.17.0.1:8000'
+          cmd_options: '-a'
+          fail_action: false
