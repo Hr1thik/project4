@@ -75,8 +75,9 @@ jobs:
           curl -I http://localhost:8000
 
       - name: Run OWASP ZAP Baseline Scan
-        uses: zaproxy/action-baseline@v0.15.0
-        with:
-          target: 'http://172.17.0.1:8000'
-          cmd_options: '-m 1'
-          fail_action: false
+     run: |
+       chmod a+w ${{ github.workspace }}
+       docker run --rm --network=host \
+         -v ${{ github.workspace }}:/zap/wrk/:rw \
+         ghcr.io/zaproxy/zaproxy:stable \
+         zap-baseline.py -t http://127.0.0.1:8000 -m 1 -r zap_report.html -I
